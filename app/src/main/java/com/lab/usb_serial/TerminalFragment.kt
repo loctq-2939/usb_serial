@@ -1,0 +1,263 @@
+package com.lab.usb_serial
+
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
+import android.os.Build
+import android.os.Bundle
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.core.content.res.ResourcesCompat
+import androidx.fragment.app.Fragment
+import com.hoho.android.usbserial.driver.UsbSerialPort
+import com.hoho.android.usbserial.driver.UsbSerialProber
+import com.hoho.android.usbserial.util.SerialInputOutputManager
+import com.lab.usb_serial.BuildConfig.APPLICATION_ID
+import com.lab.usb_serial.HexDump.dumpHexString
+import com.lab.usb_serial.databinding.FragmentTerminalBinding
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
+import java.io.IOException
+
+
+class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutputManager.Listener {
+
+    private enum class UsbPermission {
+        Unknown, Requested, Granted, Denied
+    }
+
+    private var baudRate: Int = 115200
+    private val withIoManager = false
+
+    private var broadcastReceiver: BroadcastReceiver? = null
+    protected val mainScope by lazy { MainScope() }
+//    private val controlLines: ControlLines? = null
+
+    private var usbIoManager: SerialInputOutputManager? = null
+    private var usbSerialPort: UsbSerialPort? = null
+    private var usbPermission = UsbPermission.Unknown
+    private var connected = false
+
+    lateinit var binding: FragmentTerminalBinding
+
+    override fun onCreateView(
+        inflater: LayoutInflater, container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        binding = FragmentTerminalBinding.inflate(layoutInflater)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        broadcastReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent) {
+                if (INTENT_ACTION_GRANT_USB == intent.action) {
+                    usbPermission = if (intent.getBooleanExtra(
+                            UsbManager.EXTRA_PERMISSION_GRANTED,
+                            false
+                        )
+                    ) UsbPermission.Granted else UsbPermission.Denied
+                    connect()
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        requireActivity().registerReceiver(broadcastReceiver, IntentFilter(INTENT_ACTION_GRANT_USB))
+
+        if (usbPermission == UsbPermission.Unknown || usbPermission == UsbPermission.Granted)
+            mainScope.launch {
+                connect()
+            }
+    }
+
+    override fun onPause() {
+        if (connected) {
+            status("disconnected")
+            disconnect()
+        }
+        requireActivity().unregisterReceiver(broadcastReceiver)
+        super.onPause()
+    }
+
+    override fun onNewData(data: ByteArray?) {
+        mainScope.launch {
+            data?.let { receive(it) }
+        }
+    }
+
+    override fun onRunError(e: Exception?) {
+        mainScope.launch {
+            status("connection lost: " + e?.message)
+            disconnect()
+        }
+    }
+
+    private fun connect() {
+        val device: UsbDevice? = null
+        val usbManager = requireActivity().getSystemService(Context.USB_SERVICE) as UsbManager
+        /*for (v in usbManager.deviceList.values) if (v.deviceId == deviceId) device = v
+        if (device == null) {
+            status("connection failed: device not found")
+            return
+        }*/
+
+        val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
+        if (availableDrivers.isEmpty()) {
+            status("connection failed: device not found")
+            return
+        }
+        // Open a connection to the first available driver.
+        var driver = availableDrivers[0]
+        if (driver == null) {
+            driver = CustomProber.customProber().probeDevice(device)
+        }
+        if (driver == null) {
+            status("connection failed: no driver for device")
+            return
+        }
+        val usbConnection = usbManager.openDevice(driver.device)
+        if (usbConnection == null && usbPermission === UsbPermission.Unknown && !usbManager.hasPermission(
+                driver.device
+            )
+        ) {
+            usbPermission = UsbPermission.Requested
+            val flags =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+            val usbPermissionIntent =
+                PendingIntent.getBroadcast(activity, 0, Intent(INTENT_ACTION_GRANT_USB), flags)
+            usbManager.requestPermission(driver.device, usbPermissionIntent)
+            return
+        }
+
+        if (usbConnection == null) {
+            if (!usbManager.hasPermission(driver.device)) status("connection failed: permission denied") else status(
+                "connection failed: open failed"
+            )
+            return
+        }
+
+        try {
+            usbSerialPort = driver.ports[0] // Most devices have just one port (port 0)
+            usbSerialPort?.open(usbConnection)
+            usbSerialPort?.setParameters(
+                baudRate,
+                UsbSerialPort.DATABITS_8,
+                UsbSerialPort.STOPBITS_1,
+                UsbSerialPort.PARITY_NONE
+            )
+            if (withIoManager) {
+                usbIoManager = SerialInputOutputManager(usbSerialPort, this)
+                usbIoManager?.start()
+            }
+            status("connected")
+            connected = true
+            //controlLines.start()
+        } catch (e: java.lang.Exception) {
+            status("connection failed: " + e.message)
+            disconnect()
+        }
+    }
+
+    private fun disconnect() {
+        connected = false
+        //controlLines.stop()
+        usbIoManager?.apply {
+            listener = null
+            stop()
+        }
+        usbIoManager = null
+        try {
+            usbSerialPort?.close()
+        } catch (ignored: IOException) {
+        }
+        usbSerialPort = null
+    }
+
+    private fun send(str: String) {
+        if (!connected) {
+            Toast.makeText(activity, "not connected", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val data = str.toByteArray()
+            val spn = SpannableStringBuilder()
+            spn.append(
+                """send ${data.size} bytes"""
+            )
+            spn.append(dumpHexString(data)).append("\n")
+            spn.setSpan(
+                ForegroundColorSpan(ResourcesCompat.getColor(resources, R.color.black, null)),
+                0,
+                spn.length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            binding.receiveText.append(spn)
+            usbSerialPort?.write(data, WRITE_WAIT_MILLIS)
+        } catch (e: java.lang.Exception) {
+            onRunError(e)
+        }
+    }
+
+    private fun read() {
+        if (!connected) {
+            Toast.makeText(activity, "not connected", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val buffer = ByteArray(8192)
+            val len = usbSerialPort?.read(buffer, READ_WAIT_MILLIS)
+            len?.let {
+                receive(buffer.copyOf(it))
+            }
+        } catch (e: IOException) {
+            // when using read with timeout, USB bulkTransfer returns -1 on timeout _and_ errors
+            // like connection loss, so there is typically no exception thrown here on error
+            status("connection lost: " + e.message)
+            disconnect()
+        }
+    }
+
+    private fun receive(data: ByteArray) {
+        val spn = SpannableStringBuilder()
+        spn.append(
+            """receive ${data.size} bytes"""
+        )
+        if (data.isNotEmpty()) spn.append(dumpHexString(data)).append("\n")
+        binding.receiveText.append(spn)
+    }
+
+    fun status(str: String) {
+        val spn = SpannableStringBuilder(
+            """
+              $str
+              
+              """.trimIndent()
+        )
+        spn.setSpan(
+            ForegroundColorSpan(ResourcesCompat.getColor(resources, R.color.black, null)),
+            0,
+            spn.length,
+            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        binding.receiveText.append(spn)
+    }
+
+    companion object {
+        const val INTENT_ACTION_GRANT_USB: String = "$APPLICATION_ID.GRANT_USB"
+        const val WRITE_WAIT_MILLIS = 2000
+        const val READ_WAIT_MILLIS = 2000
+    }
+}
