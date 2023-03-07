@@ -9,6 +9,8 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
@@ -16,17 +18,18 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import android.widget.ToggleButton
 import androidx.core.content.res.ResourcesCompat
 import androidx.fragment.app.Fragment
 import com.hoho.android.usbserial.driver.UsbSerialPort
+import com.hoho.android.usbserial.driver.UsbSerialPort.ControlLine
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import com.lab.usb_serial.BuildConfig.APPLICATION_ID
 import com.lab.usb_serial.HexDump.dumpHexString
 import com.lab.usb_serial.databinding.FragmentTerminalBinding
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.launch
 import java.io.IOException
+import java.util.EnumSet
 
 
 class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutputManager.Listener {
@@ -39,13 +42,14 @@ class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutput
     private val withIoManager = false
 
     private var broadcastReceiver: BroadcastReceiver? = null
-    protected val mainScope by lazy { MainScope() }
-//    private val controlLines: ControlLines? = null
+    private var mainLooper: Handler? = null
 
     private var usbIoManager: SerialInputOutputManager? = null
     private var usbSerialPort: UsbSerialPort? = null
     private var usbPermission = UsbPermission.Unknown
-    private var connected = false
+    var connected = false
+
+    private var controlLines: ControlLines? = null
 
     lateinit var binding: FragmentTerminalBinding
 
@@ -71,6 +75,22 @@ class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutput
                 }
             }
         }
+        mainLooper = Handler(Looper.getMainLooper())
+        controlLines = ControlLines(view)
+
+        setupView()
+    }
+
+    private fun setupView() {
+        with(binding) {
+            btSend.setOnClickListener {
+                edtMessage.text?.let {
+                    if (it.isNotEmpty()) {
+                        send(it.toString())
+                    }
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -78,9 +98,7 @@ class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutput
         requireActivity().registerReceiver(broadcastReceiver, IntentFilter(INTENT_ACTION_GRANT_USB))
 
         if (usbPermission == UsbPermission.Unknown || usbPermission == UsbPermission.Granted)
-            mainScope.launch {
-                connect()
-            }
+            mainLooper?.post(this::connect)
     }
 
     override fun onPause() {
@@ -93,13 +111,13 @@ class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutput
     }
 
     override fun onNewData(data: ByteArray?) {
-        mainScope.launch {
-            data?.let { receive(it) }
+        data?.let {
+            mainLooper?.post { receive(it) }
         }
     }
 
     override fun onRunError(e: Exception?) {
-        mainScope.launch {
+        mainLooper?.post {
             status("connection lost: " + e?.message)
             disconnect()
         }
@@ -164,7 +182,7 @@ class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutput
             }
             status("connected")
             connected = true
-            //controlLines.start()
+            controlLines?.start()
         } catch (e: java.lang.Exception) {
             status("connection failed: " + e.message)
             disconnect()
@@ -173,7 +191,7 @@ class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutput
 
     private fun disconnect() {
         connected = false
-        //controlLines.stop()
+        controlLines?.stop()
         usbIoManager?.apply {
             listener = null
             stop()
@@ -255,9 +273,108 @@ class TerminalFragment : Fragment(R.layout.fragment_terminal), SerialInputOutput
         binding.receiveText.append(spn)
     }
 
+    inner class ControlLines(view: View) {
+
+        private val runnable: Runnable
+
+        init {
+            runnable = Runnable {
+                this.run()
+            } // w/o explicit Runnable, a new lambda would be created on each postDelayed, which would not be found again by removeCallbacks
+            with(binding) {
+                rtsBtn.setOnClickListener { v: View ->
+                    toggle(v)
+                }
+                dtrBtn.setOnClickListener { v: View ->
+                    toggle(v)
+                }
+            }
+        }
+
+        private fun toggle(v: View) {
+            val control = v as ToggleButton
+            if (!connected) {
+                control.isChecked = !control.isChecked
+                Toast.makeText(requireContext(), "not connected", Toast.LENGTH_SHORT).show()
+                return
+            }
+            var ctrl = ""
+            try {
+                if (control == binding.rtsBtn) {
+                    ctrl = "RTS"
+                    usbSerialPort?.rts = control.isChecked
+                }
+                if (control == binding.dtrBtn) {
+                    ctrl = "DTR"
+                    usbSerialPort?.dtr = control.isChecked
+                }
+            } catch (e: IOException) {
+                status("set" + ctrl + "() failed: " + e.message)
+            }
+        }
+
+        private fun run() {
+            if (!connected) return
+            try {
+                with(binding) {
+                    val controlLines: EnumSet<ControlLine>? = usbSerialPort?.controlLines
+                    rtsBtn.isChecked = controlLines.isContains(ControlLine.RTS)
+                    ctsBtn.isChecked = controlLines.isContains(ControlLine.CTS)
+                    dtrBtn.isChecked = controlLines.isContains(ControlLine.DTR)
+                    dsrBtn.isChecked = controlLines.isContains(ControlLine.DSR)
+                    cdBtn.isChecked = controlLines.isContains(ControlLine.CD)
+                    riBtn.isChecked = controlLines.isContains(ControlLine.RI)
+                    mainLooper?.postDelayed(runnable, REFRESH_INTERVAL)
+                }
+            } catch (e: IOException) {
+                status("getControlLines() failed: " + e.message + " -> stopped control line refresh")
+            }
+        }
+
+        fun start() {
+            if (!connected) return
+            try {
+                with(binding) {
+                    val controlLines: EnumSet<ControlLine>? = usbSerialPort?.supportedControlLines
+                    if (!controlLines.isContains(ControlLine.RTS)) rtsBtn.visibility =
+                        View.INVISIBLE
+                    if (!controlLines.isContains(ControlLine.CTS)) ctsBtn.visibility =
+                        View.INVISIBLE
+                    if (!controlLines.isContains(ControlLine.DTR)) dtrBtn.visibility =
+                        View.INVISIBLE
+                    if (!controlLines.isContains(ControlLine.DSR)) dsrBtn.visibility =
+                        View.INVISIBLE
+                    if (!controlLines.isContains(ControlLine.CD)) cdBtn.visibility = View.INVISIBLE
+                    if (!controlLines.isContains(ControlLine.RI)) riBtn.visibility = View.INVISIBLE
+                    run()
+                }
+            } catch (e: IOException) {
+                Toast.makeText(
+                    requireContext(),
+                    "getSupportedControlLines() failed: " + e.message,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        fun stop() {
+            mainLooper?.removeCallbacks(runnable)
+            with(binding) {
+                rtsBtn.isChecked = false
+                ctsBtn.isChecked = false
+                dtrBtn.isChecked = false
+                dsrBtn.isChecked = false
+                cdBtn.isChecked = false
+                riBtn.isChecked = false
+            }
+
+        }
+    }
+
     companion object {
         const val INTENT_ACTION_GRANT_USB: String = "$APPLICATION_ID.GRANT_USB"
         const val WRITE_WAIT_MILLIS = 2000
         const val READ_WAIT_MILLIS = 2000
+        const val REFRESH_INTERVAL = 200L // msec
     }
 }

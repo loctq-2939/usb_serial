@@ -6,18 +6,105 @@
     android:layout_height="match_parent"
     tools:context=".TerminalFragment">
 
+    <androidx.appcompat.widget.LinearLayoutCompat
+        android:id="@+id/controlLine"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:layout_constraintBottom_toTopOf="@id/receiveText"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <androidx.appcompat.widget.AppCompatToggleButton
+            android:id="@+id/rtsBtn"
+            android:layout_width="60dp"
+            android:layout_height="50dp"
+            android:textOff="RTS"
+            android:textOn="RTS" />
+
+        <androidx.appcompat.widget.AppCompatToggleButton
+            android:id="@+id/ctsBtn"
+            android:layout_width="60dp"
+            android:layout_height="50dp"
+            android:textOff="CTS"
+            android:textOn="CTS" />
+
+        <androidx.appcompat.widget.AppCompatToggleButton
+            android:id="@+id/dtrBtn"
+            android:layout_width="60dp"
+            android:layout_height="50dp"
+            android:textOff="DTR"
+            android:textOn="DTR" />
+
+        <androidx.appcompat.widget.AppCompatToggleButton
+            android:id="@+id/dsrBtn"
+            android:layout_width="60dp"
+            android:layout_height="50dp"
+            android:textOff="DSR"
+            android:textOn="DSR" />
+
+        <androidx.appcompat.widget.AppCompatToggleButton
+            android:id="@+id/cdBtn"
+            android:layout_width="60dp"
+            android:layout_height="50dp"
+            android:textOff="CD"
+            android:textOn="CD" />
+
+        <androidx.appcompat.widget.AppCompatToggleButton
+            android:id="@+id/riBtn"
+            android:layout_width="60dp"
+            android:layout_height="50dp"
+            android:textOff="RI"
+            android:textOn="RI" />
+
+    </androidx.appcompat.widget.LinearLayoutCompat>
+
     <androidx.appcompat.widget.AppCompatTextView
         android:id="@+id/receiveText"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
         android:freezesText="true"
         android:gravity="bottom"
         android:scrollbars="vertical"
         android:textAppearance="@style/TextAppearance.AppCompat.Medium"
         android:typeface="monospace"
+        app:layout_constraintBottom_toTopOf="@id/layoutSend"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/controlLine" />
+
+    <LinearLayout
+        android:id="@+id/layoutSend"
+        android:layout_width="0dp"
+        android:layout_height="50dp"
+        android:background="@android:color/white"
+        android:minHeight="48dp"
+        android:orientation="horizontal"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toRightOf="parent">
+
+        <EditText
+            android:id="@+id/edtMessage"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginLeft="16dp"
+            android:layout_marginRight="16dp"
+            android:layout_weight="1"
+            android:hint="@string/input"
+            android:background="@android:color/transparent"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:maxLines="6" />
+
+        <Button
+            android:id="@+id/btSend"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/send"
+            android:textSize="14sp" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
