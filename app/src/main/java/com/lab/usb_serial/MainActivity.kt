@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
         val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager)
         if (availableDrivers.isEmpty()) {
             Toast.makeText(this, "Available drivers is empty", Toast.LENGTH_LONG).show()
+            writeToFile("Available drivers is empty")
             return
         }
 
@@ -57,6 +58,7 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
             }
 
             port.write("Just connected to devices by android !".toByteArray(), WRITE_WAIT_MILLIS)
+            writeToFile("Just connected to devices by android !")
             val response: ByteArray? = null
             port.read(response, READ_WAIT_MILLIS)
             response?.let {
@@ -66,6 +68,7 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
             port.close()
         } catch (ex: Exception) {
             Toast.makeText(this, ex.message.toString(), Toast.LENGTH_LONG).show()
+            writeToFile(ex.message.toString())
         }
     }
 
