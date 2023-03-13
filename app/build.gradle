@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'kotlin-kapt'
 }
 
 android {
@@ -9,7 +10,7 @@ android {
     defaultConfig {
         applicationId "com.lab.usb_serial"
         minSdk 21
-        targetSdk 32
+        targetSdk 33
         versionCode 1
         versionName "1.0"
 
@@ -37,8 +38,8 @@ android {
 }
 
 dependencies {
-
-    implementation 'androidx.core:core-ktx:1.7.0'
+    def lifecycleVersion = "2.5.1"
+    implementation 'androidx.core:core-ktx:1.9.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.8.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
@@ -46,4 +47,18 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     implementation 'com.github.mik3y:usb-serial-for-android:3.4.6'
+
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:${lifecycleVersion}")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:${lifecycleVersion}")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:${lifecycleVersion}")
+    implementation("androidx.lifecycle:lifecycle-common-java8:${lifecycleVersion}")
+
+    // The core artifact.
+    implementation 'com.github.fondesa:kpermissions:3.4.0'
+    // If you want the extensions for RxJava 2.
+    implementation 'com.github.fondesa:kpermissions-rx2:3.4.0'
+    // If you want the extensions for RxJava 3.
+    implementation 'com.github.fondesa:kpermissions-rx3:3.4.0'
+    // If you want the extensions for the Kotlin coroutines.
+    implementation 'com.github.fondesa:kpermissions-coroutines:3.4.0'
 }
